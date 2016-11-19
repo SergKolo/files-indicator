@@ -1,0 +1,8 @@
+[Desktop Entry]
+Version=0.1
+Name=Files Indicator
+Comment=Indicator for easy access to files and folders
+Exec=files-indicator
+Type=Application
+Icon=document-open-recent
+Terminal=false
