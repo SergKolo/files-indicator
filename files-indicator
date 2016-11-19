@@ -1,0 +1,509 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+#
+# Author: Serg Kolo , contact: 1047481448@qq.com
+# Date: September 27 , 2016
+# Purpose: appindicator for displaying mounted filesystem usage
+# Tested on: Ubuntu 16.04 LTS
+#
+#
+# Licensed under The MIT License (MIT).
+# See included LICENSE file or the notice below.
+#
+# Copyright © 2016 Sergiy Kolodyazhnyy
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+import gi
+gi.require_version('AppIndicator3', '0.1')
+gi.require_version('Notify', '0.7')
+from gi.repository import GLib as glib
+from gi.repository import AppIndicator3 as appindicator
+from gi.repository import Gtk as gtk
+from gi.repository import Gio
+from gi.repository import Notify
+from collections import OrderedDict
+# from collections import OrderedDict
+import urllib.parse
+import subprocess
+import copy
+import shutil
+import dbus
+import math
+import json
+import os
+
+class FilesIndicator(object):
+
+    def __init__(self):
+        self.app = appindicator.Indicator.new(
+            'files-indicator', "document-open-recent",
+            appindicator.IndicatorCategory.HARDWARE
+        )
+        self.user_home = os.path.expanduser('~')
+        filename = '.pinned_files.json'
+        self.pinned_list = os.path.join(self.user_home,filename)
+
+        self.config = os.path.join(self.user_home,'.files_indicator.json')
+        self.max_items = 15
+        self.name_length = 20
+        self.read_config()
+
+        self.app.set_status(appindicator.IndicatorStatus.ACTIVE)
+
+        self.cached_files = self.get_recent_files()
+        self.make_menu()
+        self.update()
+
+    def read_config(self,*args):
+        config = {}
+        try:
+            with open(self.config) as f:
+                 config = json.load(f)
+
+        except FileNotFoundError:
+            print('>>> ',self.config,' not found.Creating one')
+            f = open(self.config,'w')
+            config = {'max_items':self.max_items,
+                      'name_length':self.name_length
+            }
+            json.dump(config,f,indent=4)
+            f.close()
+        except json.JSONDecodeError:
+            print(">>> Can't read ",self.pinned_list,',may be corrupt')
+            return None
+        else:
+            self.max_items = config['max_items']
+            self.name_length = config['name_length']
+
+    def add_menu_item(self, menu_obj, item_type, image, label, action, args):
+        """ dynamic function that can add menu items depending on
+            the item type and other arguments"""
+        menu_item, icon = None, None
+        if item_type is gtk.ImageMenuItem and label:
+            menu_item = gtk.ImageMenuItem.new_with_label(label)
+            menu_item.set_always_show_image(True)
+            if '/' in image:
+                icon = gtk.Image.new_from_file(image)
+            else:
+                icon = gtk.Image.new_from_icon_name(image, 48)
+            menu_item.set_image(icon)
+        elif item_type is gtk.ImageMenuItem and not label:
+            menu_item = gtk.ImageMenuItem()
+            menu_item.set_always_show_image(True)
+            if '/' in image:
+                icon = gtk.Image.new_from_file(image)
+            else:
+                icon = gtk.Image.new_from_icon_name(image, 16)
+            menu_item.set_image(icon)
+        elif item_type is gtk.MenuItem:
+            menu_item = gtk.MenuItem(label)
+        elif item_type is gtk.SeparatorMenuItem:
+            menu_item = gtk.SeparatorMenuItem()
+        if action:
+            menu_item.connect('activate', action, *args)
+
+        menu_obj.append(menu_item)
+        menu_item.show()
+
+    def get_user_dirs(self,*args):
+        user_dirs = []
+        for index,val in glib.UserDirectory.__enum_values__.items():
+            if index == 8: continue
+            dir = glib.get_user_special_dir(index)
+            if dir: user_dirs.append(dir)
+        return user_dirs
+
+    def get_file_icon(self,*args):
+        file = Gio.File.new_for_path(args[-1])
+        file_info = file.query_info("standard::*",0)
+        icon_string = file_info.get_icon().to_string()
+        if 'folder-' in icon_string:
+            return icon_string.split()[-2]
+        return icon_string.split()[-1]
+
+    def get_recent_files(self,*args):
+        manager = gtk.RecentManager.get_default()
+        try:
+            files = OrderedDict()
+            for index,item in enumerate(manager.get_items(),1):
+                    uri = item.get_uri()
+                    uri_decoded = urllib.parse.unquote(uri)
+                    filepath = uri_decoded.replace('file://','')
+                    if not os.path.exists(filepath): continue
+                    basename = os.path.basename(uri_decoded)
+                    files[basename] = filepath
+                    if index == self.max_items:
+                        break
+        except Exception as e:
+            print(e)
+            return None
+        finally:  return files
+
+    def callback(self,*args):
+        self.update()
+
+    def update(self,*args):
+        current_files = self.get_recent_files()
+        if current_files != self.cached_files:
+             self.make_menu()
+             self.cached_files = current_files
+        glib.timeout_add_seconds(3,self.callback)
+    
+    def add_submenu(self,top_menu,label):
+        menuitem = gtk.MenuItem(label)
+        submenu = gtk.Menu()
+        menuitem.set_submenu(submenu)
+        top_menu.append(menuitem)
+        menuitem.show()
+        return submenu
+    
+    def make_menu(self):
+        if hasattr(self, 'app_menu'):
+            for item in self.app_menu.get_children():
+                    self.app_menu.remove(item)
+        else:
+            self.app_menu = gtk.Menu()
+        recent = self.add_submenu(self.app_menu,'Recent Files')
+        recent_dict = self.get_recent_files()
+
+        content = [recent,gtk.ImageMenuItem,'gtk-add',
+                   'Add to Recent Files',self.add_recent,[None]
+        ]      
+        self.add_menu_item(*content) 
+
+        content = [recent,gtk.ImageMenuItem,'user-trash',
+                   'Clear recent files list',self.clear_recent,[None]
+        ]      
+        self.add_menu_item(*content)
+
+        content = [recent,gtk.SeparatorMenuItem,
+                   None,None,
+                   None,[None]
+        ]
+        self.add_menu_item(*content)
+        self.add_menu_item(*content) 
+        if not recent_dict:
+            content = [recent,gtk.MenuItem,None,
+                       'No items',None,None
+            ]
+            self.add_menu_item(*content)
+            last = None
+            for i in recent.get_children():
+                last = i
+            last.set_sensitive(False)
+        else:
+            for name,data in recent_dict.items():
+                icon = self.get_file_icon(data)
+                content = [recent, gtk.ImageMenuItem,
+                           icon, name[:self.name_length],
+                           self.open_item, [data]
+                ]
+                self.add_menu_item(*content)
+
+        # Pinned files
+        bookmarks = self.add_submenu(self.app_menu,'Pinned Files')
+        content = [bookmarks,gtk.ImageMenuItem,
+                   'bookmark_add','Pin a file',
+                   self.pin_file,[bookmarks,None]
+        ]
+        self.add_menu_item(*content)
+
+        content = [bookmarks,gtk.ImageMenuItem,
+                   'remove','Remove item',
+                   self.remove_pinned,['files']
+        ]
+        self.add_menu_item(*content)
+
+        content = [bookmarks,gtk.ImageMenuItem,
+                   'user-trash','Remove All',
+                   self.remove_all_pinned,[None]
+        ]
+        self.add_menu_item(*content)
+        content = [bookmarks,gtk.SeparatorMenuItem,
+                   None,None,
+                   None,[None]
+        ]
+        self.add_menu_item(*content)
+        self.add_menu_item(*content) 
+
+        pinned_files = self.get_pinned()
+
+        if (pinned_files and 
+            'files' in pinned_files.keys() and
+            pinned_files['files']):
+            for filepath in pinned_files['files']:
+                icon = self.get_file_icon(filepath) 
+                content = [bookmarks,gtk.ImageMenuItem,
+                           icon,os.path.basename(filepath),
+                           self.open_item,[filepath]
+                ]
+                self.add_menu_item(*content)
+        else:
+            content = [bookmarks,gtk.MenuItem,None,
+                       'No items',None,None
+            ]
+            self.add_menu_item(*content)
+            last = None
+            for i in bookmarks.get_children():
+                last = i
+            last.set_sensitive(False)
+
+        places = self.add_submenu(self.app_menu,'Places')
+        content = [places,gtk.ImageMenuItem,'add',
+                   'Pin Directory',self.pin_dir,[None]
+        ]
+        
+        self.add_menu_item(*content)
+
+        content = [places,gtk.ImageMenuItem,
+                   'remove','Remove Pinned',
+                   self.remove_pinned,['dirs']
+        ]
+        self.add_menu_item(*content)
+
+        content = [places,gtk.SeparatorMenuItem,
+                   None,None,
+                   None,[None]
+        ]
+        self.add_menu_item(*content)
+
+        content = [places,gtk.MenuItem,None,
+                   'Standard Dirs',None,None
+        ]
+        self.add_menu_item(*content)
+        last = None
+        for i in places.get_children():
+            last = i
+        last.set_sensitive(False)
+        for dir in self.get_user_dirs():
+            icon = self.get_file_icon(dir)
+            content = [places,gtk.ImageMenuItem,icon,
+                       os.path.basename(dir),self.open_item,[dir]
+                       
+            ]
+            self.add_menu_item(*content)
+
+        content = [places,gtk.SeparatorMenuItem,
+                   None,None,
+                   None,[None]
+        ]
+        self.add_menu_item(*content)
+
+        content = [places,gtk.MenuItem,None,
+                   'Pinned Dirs',None,None
+        ]
+        self.add_menu_item(*content)
+        last = None
+        for i in places.get_children():
+            last = i
+        last.set_sensitive(False)
+
+        if (pinned_files and 
+           'dirs' in pinned_files.keys() and
+           pinned_files['dirs']):
+            for dir in pinned_files['dirs']:
+                icon = self.get_file_icon(dir)
+                print(icon)
+                content = [places,gtk.ImageMenuItem,icon,
+                           os.path.basename(dir),self.open_item,[dir]
+                           
+                ]
+                self.add_menu_item(*content)
+        else:
+            content = [places,gtk.MenuItem,None,
+                       'No items',None,None
+            ]
+            self.add_menu_item(*content)
+            last = None
+            for i in places.get_children():
+                last = i
+            last.set_sensitive(False)
+
+        content = [self.app_menu,gtk.SeparatorMenuItem,
+                   None,None,
+                   None,[None]
+        ]
+        self.add_menu_item(*content)
+        content = [self.app_menu,gtk.ImageMenuItem,'exit',
+                   'quit',self.quit,[None]
+        ]
+        self.add_menu_item(*content)
+        self.app.set_menu(self.app_menu)
+
+    def check_directory(self,*args):
+        current_set = set(os.listdir(args[-1]))
+        return current_set - self.cached_set
+        
+
+    def get_pinned(self,*args):
+        try:
+            with open(self.pinned_list) as f:
+                 return json.load(f,object_pairs_hook=OrderedDict)
+                 
+        except FileNotFoundError:
+            print('>>> ',self.pinned_list,' not found')
+            return None
+        except json.JSONDecodeError:
+            print(">>> Can't read ",self.pinned_list,',may be corrupt')
+            return None
+
+    def pin_dir(self,*args):
+        # TODO
+        current_list = self.get_pinned()
+        if not current_list:
+                current_list = OrderedDict()
+                current_list['dirs'] = []
+                f = open(self.pinned_list,'w')
+                f.write("")
+                f.close()
+
+        if not args[-1]:
+                cmd = "zenity --file-selection --directory --separator || --multiple"
+                dirs = self.run_cmd(cmd.split())
+        else:
+                dirs = args[-1]
+
+        dir_list = []
+        if not dirs: return None
+        dir_list = dirs.decode().strip().split("||")
+        if not 'dirs' in current_list.keys():
+             current_list['dirs'] = []
+        for f in dir_list:
+                #icon = self.get_file_icon(f)
+                current_list['dirs'].append(f)
+
+        with open(self.pinned_list,'w') as f:
+                json.dump(current_list,f,indent=4)
+        self.make_menu()
+
+    def pin_file(self,*args):
+        current_list = self.get_pinned()
+        if not current_list:
+                current_list = OrderedDict()
+                current_list['files'] = []
+                f = open(self.pinned_list,'w')
+                f.write("")
+                f.close()
+        if not args[-1]:
+                cmd = "zenity --file-selection --separator || --multiple "
+                files = self.run_cmd(cmd.split())
+        else:
+                files = args[-1]
+
+        file_list = []
+        if not files: return None
+        file_list = files.decode().strip().split("||")
+        if not 'files' in current_list.keys():
+            current_list['files'] = []
+        for f in file_list:
+                #icon = self.get_file_icon(f)
+                current_list['files'].append(f)
+
+        with open(self.pinned_list,'w') as f:
+                json.dump(current_list,f,indent=4)
+        self.make_menu()
+
+    def remove_all_pinned(self,*args):
+        try:
+            #os.unlink(self.pinned_list)
+ 
+            with open(self.pinned_list) as f:
+                pinned = json.load(f)
+            pinned.pop('files')       
+            with open(self.pinned_list,'w') as f:
+                    json.dump(pinned,f,indent=4)
+        except:
+            pass
+        finally:
+            self.make_menu()
+
+    def remove_pinned(self,*args):
+        key = args[-1]
+        pinned = self.get_pinned() 
+        if not pinned: return
+        cmd_str = "zenity --forms --add-combo Remove --combo-values"
+        vals = "|".join(pinned[key])
+        cmd = cmd_str.split() + [vals]
+        item = self.run_cmd(cmd)
+        if item: 
+            path = item.decode().strip()
+            index = pinned[key].index(path)
+            pinned[key].pop(index)
+            with open(self.pinned_list,'w') as f:
+                json.dump(pinned,f,indent=4)
+            self.make_menu()
+
+    def add_recent(self,*args):
+        cmd = "zenity --file-selection --separator || --multiple "
+        files = self.run_cmd(cmd.split())
+        file_list = []
+        if not files: return
+        file_list = files.decode().strip().split("||")
+        items = ['file://' + f for f in file_list]
+        for f in items: gtk.RecentManager().get_default().add_item(f)
+
+    def clear_recent(self,*args):
+        try:
+            gtk.RecentManager.get_default().purge_items()
+            self.make_menu()
+        except:
+            pass
+
+    def open_item(self,*args):
+        #self.run_cmd(['xdg-open',args[-1]]) 
+        subprocess.Popen(['xdg-open',args[-1]])
+
+    def quit(self,*args):
+        gtk.main_quit()
+
+    def run_cmd(self, cmdlist):
+        """ utility: reusable function for running external commands """
+        #new_env = dict(os.environ)
+        #new_env['LC_ALL'] = 'C'
+        try:
+            stdout = subprocess.check_output(cmdlist) #env=new_env)
+        except subprocess.CalledProcessError:
+            pass
+        else:
+            if stdout:
+                return stdout
+
+    def run(self):
+        """ Launches the indicator """
+        try:
+            gtk.main()
+        except KeyboardInterrupt:
+            pass
+
+    def quit(self, *args):
+        """ closes indicator """
+        gtk.main_quit()
+
+
+def main():
+    """ defines program entry point """
+    indicator = FilesIndicator()
+    indicator.run()
+
+if __name__ == '__main__':
+  try:
+    main()
+  except  KeyboardInterrupt:
+    gtk.main_quit()

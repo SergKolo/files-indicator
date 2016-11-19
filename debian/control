@@ -1,0 +1,17 @@
+Source: files-indicator
+Section: python
+Priority: extra
+Maintainer: Sergiy Kolodyazhnyy <1047481448@qq.com>
+Build-Depends: debhelper (>= 9)
+Standards-Version: 3.9.8
+
+Package: files-indicator
+Architecture: all
+Depends: python3-gi,
+         gir1.2-appindicator3-0.1,
+         ${python:Depends},
+         ${misc:Depends}
+Description: indicator for easy access of recent files
+  Indicator for accessing and altering recently used 
+  files in Gtk.RecentManager
+
