@@ -3,8 +3,8 @@
 
 #
 # Author: Serg Kolo , contact: 1047481448@qq.com
-# Date: September 27 , 2016
-# Purpose: appindicator for displaying mounted filesystem usage
+# Date: November 19 , 2016
+# Purpose: appindicator for accessing files and folders
 # Tested on: Ubuntu 16.04 LTS
 #
 #
