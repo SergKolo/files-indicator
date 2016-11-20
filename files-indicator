@@ -131,6 +131,19 @@ class FilesIndicator(object):
         return user_dirs
 
     def get_file_icon(self,*args):
+        if args[-1].endswith('.desktop'):
+            desk_file = Gio.DesktopAppInfo.new_from_filename(args[-1])
+            icon = desk_file.get_icon()
+            if type(icon) == Gio.ThemedIcon:
+                themed_name = icon.get_names()[0]
+                theme = gtk.IconTheme.get_default()
+                name = theme.lookup_icon(themed_name, 48, 0).get_filename()
+            if type(icon) == Gio.FileIcon:
+                name = icon.get_file().get_uri()
+
+            icon_url= urllib.parse.unquote(name).replace('file://','') 
+            return icon_url
+
         file = Gio.File.new_for_path(args[-1])
         file_info = file.query_info("standard::*",0)
         icon_string = file_info.get_icon().to_string()
@@ -468,7 +481,10 @@ class FilesIndicator(object):
 
     def open_item(self,*args):
         #self.run_cmd(['xdg-open',args[-1]]) 
-        subprocess.Popen(['xdg-open',args[-1]])
+        if args[-1].endswith('.desktop'):
+            desk_file = Gio.DesktopAppInfo.new_from_filename(args[-1])
+            return desk_file.launch_uris()
+        return subprocess.Popen(['xdg-open',args[-1]])
 
     def quit(self,*args):
         gtk.main_quit()
