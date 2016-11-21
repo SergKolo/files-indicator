@@ -485,6 +485,12 @@ class FilesIndicator(object):
             pass
 
     def open_item(self,*args):
+        if not os.path.exists(args[-1]):
+            cmd = ['zenity','--error','--text',
+                   args[-1],'\n doesn\'t exist'
+            ]
+            self.run_cmd(cmd)
+            return
         #self.run_cmd(['xdg-open',args[-1]]) 
         if args[-1].endswith('.desktop'):
             desk_file = Gio.DesktopAppInfo.new_from_filename(args[-1])
