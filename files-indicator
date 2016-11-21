@@ -368,7 +368,12 @@ class FilesIndicator(object):
     def get_pinned(self,*args):
         try:
             with open(self.pinned_list) as f:
-                 return json.load(f,object_pairs_hook=OrderedDict)
+                 things = json.load(f,object_pairs_hook=OrderedDict)
+                 for key,pathlist in things.items():
+                     for index,path in enumerate(pathlist):
+                         if not os.path.exists(path):
+                             pathlist.pop(index)
+                 return things
                  
         except FileNotFoundError:
             print('>>> ',self.pinned_list,' not found')
