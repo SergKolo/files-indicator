@@ -131,6 +131,8 @@ class FilesIndicator(object):
         return user_dirs
 
     def get_file_icon(self,*args):
+        if not os.path.exists(args[-1]):
+            return 'error'
         if args[-1].endswith('.desktop'):
             desk_file = Gio.DesktopAppInfo.new_from_filename(args[-1])
             icon = desk_file.get_icon()
@@ -369,11 +371,15 @@ class FilesIndicator(object):
         try:
             with open(self.pinned_list) as f:
                  things = json.load(f,object_pairs_hook=OrderedDict)
-                 for key,pathlist in things.items():
-                     for index,path in enumerate(pathlist):
-                         if not os.path.exists(path):
-                             pathlist.pop(index)
-                 return things
+
+            new_things = OrderedDict()
+            for key,pathlist in things.items():
+                new_list = []
+                for index,path in enumerate(pathlist):
+                    if os.path.exists(path):
+                       new_list.append(path) 
+                new_things[key] = new_list
+            return new_things
                  
         except FileNotFoundError:
             print('>>> ',self.pinned_list,' not found')
@@ -490,8 +496,9 @@ class FilesIndicator(object):
                    'Path doesn\'t exist: ' + args[-1]
             ]
             self.run_cmd(cmd)
+            self.make_menu()
             return
-        #self.run_cmd(['xdg-open',args[-1]]) 
+
         if args[-1].endswith('.desktop'):
             desk_file = Gio.DesktopAppInfo.new_from_filename(args[-1])
             return desk_file.launch_uris()
