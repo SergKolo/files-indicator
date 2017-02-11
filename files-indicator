@@ -133,16 +133,19 @@ class FilesIndicator(object):
     def get_file_icon(self,*args):
         if not os.path.exists(args[-1]):
             return 'error'
+
         if args[-1].endswith('.desktop'):
             desk_file = Gio.DesktopAppInfo.new_from_filename(args[-1])
             icon = desk_file.get_icon()
+            if not icon:  return 'gtk-file'
             if type(icon) == Gio.ThemedIcon:
+                print('Gio.ThemedIcon')
                 themed_name = icon.get_names()[0]
                 theme = gtk.IconTheme.get_default()
                 name = theme.lookup_icon(themed_name, 48, 0).get_filename()
             if type(icon) == Gio.FileIcon:
+                print('Gio.FileIcon')
                 name = icon.get_file().get_uri()
-
             icon_url= urllib.parse.unquote(name).replace('file://','') 
             return icon_url
 
