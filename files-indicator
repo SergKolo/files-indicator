@@ -41,6 +41,7 @@ from gi.repository import Notify
 from collections import OrderedDict
 # from collections import OrderedDict
 import urllib.parse
+import signal
 import subprocess
 import copy
 import shutil
@@ -70,6 +71,9 @@ class FilesIndicator(object):
         self.cached_files = self.get_recent_files()
         self.make_menu()
         self.update()
+
+    def set_defaults(self,*args):
+        pass
 
     def read_config(self,*args):
         config = {}
@@ -338,7 +342,7 @@ class FilesIndicator(object):
            pinned_files['dirs']):
             for dir in pinned_files['dirs']:
                 icon = self.get_file_icon(dir)
-                print(icon)
+                #print(icon)
                 content = [places,gtk.ImageMenuItem,icon,
                            os.path.basename(dir),self.open_item,[dir]
                            
@@ -354,11 +358,57 @@ class FilesIndicator(object):
                 last = i
             last.set_sensitive(False)
 
+        # LINKS
+        
+        links_menu = self.add_submenu(self.app_menu,'Links')
+        #emblem-symbolic-link
+        content = [links_menu,gtk.ImageMenuItem,'add',
+                   'Add link',self.pin_link,[None]
+        ]
+        
+        self.add_menu_item(*content)
+
+        content = [links_menu,gtk.ImageMenuItem,
+                   'remove','Remove link',
+                   self.remove_link,[None]
+        ]
+        self.add_menu_item(*content)
+
+        content = [links_menu,gtk.SeparatorMenuItem,
+                   None,None,
+                   None,[None]
+        ]
+        self.add_menu_item(*content)
+
+        print(pinned_files['links'])
+
+        if (pinned_files and 
+           'links' in pinned_files.keys() and
+           pinned_files['links']):
+            for link in pinned_files['links']:
+                print(link)
+                icon = 'emblem-web'
+                content = [links_menu,gtk.ImageMenuItem,icon,
+                           link[:30] + "...",self.open_link,[link]
+                ]
+                self.add_menu_item(*content)
+        else:
+            content = [links_menu,gtk.MenuItem,None,
+                       'No items',None,None
+            ]
+            self.add_menu_item(*content)
+            last = None
+            for i in links_menu.get_children():
+                last = i
+            last.set_sensitive(False)
+
         content = [self.app_menu,gtk.SeparatorMenuItem,
                    None,None,
                    None,[None]
         ]
         self.add_menu_item(*content)
+        #---
+
         content = [self.app_menu,gtk.ImageMenuItem,'exit',
                    'quit',self.quit,[None]
         ]
@@ -374,10 +424,13 @@ class FilesIndicator(object):
         try:
             with open(self.pinned_list) as f:
                  things = json.load(f,object_pairs_hook=OrderedDict)
-
             new_things = OrderedDict()
             for key,pathlist in things.items():
                 new_list = []
+                if key == 'links':
+                   new_list = pathlist
+                   new_things[key] = new_list
+                   continue
                 for index,path in enumerate(pathlist):
                     if os.path.exists(path):
                        new_list.append(path) 
@@ -395,17 +448,17 @@ class FilesIndicator(object):
         # TODO
         current_list = self.get_pinned()
         if not current_list:
-                current_list = OrderedDict()
-                current_list['dirs'] = []
-                f = open(self.pinned_list,'w')
-                f.write("")
-                f.close()
+            current_list = OrderedDict()
+            current_list['dirs'] = []
+            f = open(self.pinned_list,'w')
+            f.write("")
+            f.close()
 
         if not args[-1]:
-                cmd = "zenity --file-selection --directory --separator || --multiple"
-                dirs = self.run_cmd(cmd.split())
+            cmd = "zenity --file-selection --directory --separator || --multiple"
+            dirs = self.run_cmd(cmd.split())
         else:
-                dirs = args[-1]
+            dirs = args[-1]
 
         dir_list = []
         if not dirs: return None
@@ -413,8 +466,33 @@ class FilesIndicator(object):
         if not 'dirs' in current_list.keys():
              current_list['dirs'] = []
         for f in dir_list:
-                #icon = self.get_file_icon(f)
-                current_list['dirs'].append(f)
+            current_list['dirs'].append(f)
+
+        with open(self.pinned_list,'w') as f:
+            json.dump(current_list,f,indent=4)
+        self.make_menu()
+
+    #TODO: rewrite pin_link,pin_dirs,and pin_files as one function ?
+    def pin_link(self,*args):
+        current_list = self.get_pinned()
+        if not current_list:
+            current_list = OrderedDict()
+            current_list['links'] = []
+            f = open(self.pinned_list,'w')
+            f.write("")
+            f.close()
+        if not args[-1]:
+            cmd = ['zenity','--entry','--text','Insert URL']
+            link = self.run_cmd(cmd)
+        else:
+            link = args[-1]
+
+        if not link: return None
+        link = link.decode().strip()
+
+        if not 'links' in current_list.keys():
+            current_list['links'] = []
+        current_list['links'].append(link)
 
         with open(self.pinned_list,'w') as f:
                 json.dump(current_list,f,indent=4)
@@ -423,16 +501,16 @@ class FilesIndicator(object):
     def pin_file(self,*args):
         current_list = self.get_pinned()
         if not current_list:
-                current_list = OrderedDict()
-                current_list['files'] = []
-                f = open(self.pinned_list,'w')
-                f.write("")
-                f.close()
+            current_list = OrderedDict()
+            current_list['files'] = []
+            f = open(self.pinned_list,'w')
+            f.write("")
+            f.close()
         if not args[-1]:
-                cmd = "zenity --file-selection --separator || --multiple "
-                files = self.run_cmd(cmd.split())
+            cmd = "zenity --file-selection --separator || --multiple "
+            files = self.run_cmd(cmd.split())
         else:
-                files = args[-1]
+            files = args[-1]
 
         file_list = []
         if not files: return None
@@ -449,8 +527,6 @@ class FilesIndicator(object):
 
     def remove_all_pinned(self,*args):
         try:
-            #os.unlink(self.pinned_list)
- 
             with open(self.pinned_list) as f:
                 pinned = json.load(f)
             pinned.pop('files')       
@@ -460,6 +536,29 @@ class FilesIndicator(object):
             pass
         finally:
             self.make_menu()
+
+    def remove_link(self,*args):
+        key = 'links'
+        pinned = self.get_pinned()
+        if not pinned: return
+        columns=[]
+        for i in pinned[key]:
+            columns.append("_")
+            columns.append(i)
+        print(columns)
+        cmd=['zenity', '--title','', '--text','Remove Link', 
+             '--list', '--checklist', '--column', '', 
+             '--column','URL',*columns]
+        selection = self.run_cmd(cmd)
+        if not selection: return
+        if isinstance(selection,bytes): selection = selection.decode()
+        selection = selection.strip()
+        index = pinned[key].index(selection)
+        pinned[key].pop(index)
+        with open(self.pinned_list,'w') as f:
+            json.dump(pinned,f,indent=4)
+        self.make_menu()
+          
 
     def remove_pinned(self,*args):
         key = args[-1]
@@ -493,6 +592,9 @@ class FilesIndicator(object):
         except:
             pass
 
+    def open_link(self,*args):
+        return self.run_cmd(['x-www-browser',args[-1]])
+
     def open_item(self,*args):
         if not os.path.exists(args[-1]):
             cmd = ['zenity','--error','--text',
@@ -512,8 +614,6 @@ class FilesIndicator(object):
 
     def run_cmd(self, cmdlist):
         """ utility: reusable function for running external commands """
-        #new_env = dict(os.environ)
-        #new_env['LC_ALL'] = 'C'
         try:
             stdout = subprocess.check_output(cmdlist) #env=new_env)
         except subprocess.CalledProcessError:
@@ -533,14 +633,11 @@ class FilesIndicator(object):
         """ closes indicator """
         gtk.main_quit()
 
-
 def main():
     """ defines program entry point """
     indicator = FilesIndicator()
+    signal.signal(signal.SIGINT,signal.SIG_DFL)
     indicator.run()
 
 if __name__ == '__main__':
-  try:
     main()
-  except  KeyboardInterrupt:
-    gtk.main_quit()
