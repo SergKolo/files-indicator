@@ -255,7 +255,7 @@ class FilesIndicator(object):
 
         content = [bookmarks,gtk.ImageMenuItem,
                    'user-trash','Remove All',
-                   self.remove_all_pinned,[None]
+                   self.remove_all_pinned,['files']
         ]
         self.add_menu_item(*content)
         content = [bookmarks,gtk.SeparatorMenuItem,
@@ -374,13 +374,17 @@ class FilesIndicator(object):
         ]
         self.add_menu_item(*content)
 
+        content = [links_menu,gtk.ImageMenuItem,
+                   'user-trash','Remove all links',
+                   self.remove_all_pinned,['links']
+        ]
+        self.add_menu_item(*content)
+
         content = [links_menu,gtk.SeparatorMenuItem,
                    None,None,
                    None,[None]
         ]
         self.add_menu_item(*content)
-
-        print(pinned_files['links'])
 
         if (pinned_files and 
            'links' in pinned_files.keys() and
@@ -529,7 +533,7 @@ class FilesIndicator(object):
         try:
             with open(self.pinned_list) as f:
                 pinned = json.load(f)
-            pinned.pop('files')       
+            pinned.pop(args[-1])       
             with open(self.pinned_list,'w') as f:
                     json.dump(pinned,f,indent=4)
         except:
