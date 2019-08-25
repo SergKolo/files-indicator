@@ -62,8 +62,6 @@ class FilesIndicator(object):
         self.pinned_list = os.path.join(self.user_home,filename)
 
         self.config = os.path.join(self.user_home,'.files_indicator.json')
-        self.max_items = 15
-        self.name_length = 20
         self.read_config()
 
         self.app.set_status(appindicator.IndicatorStatus.ACTIVE)
@@ -73,9 +71,12 @@ class FilesIndicator(object):
         self.update()
 
     def set_defaults(self,*args):
-        pass
-
+        self.max_items = 15
+        self.name_length = 20
+        self.recent_files_in_main_menu = False
+        
     def read_config(self,*args):
+        self.set_defaults()
         config = {}
         try:
             with open(self.config) as f:
@@ -85,7 +86,8 @@ class FilesIndicator(object):
             print('>>> ',self.config,' not found.Creating one')
             f = open(self.config,'w')
             config = {'max_items':self.max_items,
-                      'name_length':self.name_length
+                      'name_length':self.name_length,
+                      'recent_files_in_main_menu':self.recent_files_in_main_menu
             }
             json.dump(config,f,indent=4)
             f.close()
@@ -95,6 +97,9 @@ class FilesIndicator(object):
         else:
             self.max_items = config['max_items']
             self.name_length = config['name_length']
+            self.recent_files_in_main_menu =  config['recent_files_in_main_menu']
+            # TODO: check for missing config keywords in already existing file
+            #    (throws KeyError exception)
 
     def add_menu_item(self, menu_obj, item_type, image, label, action, args):
         """ dynamic function that can add menu items depending on
